@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiaDiet AI · 糖尿病风险评估与饮食推荐</title>
+<!-- Chart.js 在线 CDN（按需求引入，无需本地 js 文件） -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --primary: #1565c0;        /* 医疗蓝 */
+    --primary-light: #e3f0fb;
+    --border: #d8e4ef;
+    --text: #1f2d3d;
+    --text-sub: #5b7083;
+    --bg: #f4f8fc;
+    --green: #2e7d32;  --green-bg: #e8f5e9;
+    --amber: #b26a00;  --amber-bg: #fff4e0;
+    --red: #c62828;    --red-bg: #fdeceb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+  .container { max-width: 1080px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  /* ===== 顶部 ===== */
+  header {
+    background: linear-gradient(135deg, #0d47a1, #1976d2);
+    color: #fff; padding: 26px 16px; text-align: center;
+  }
+  header h1 { font-size: 26px; letter-spacing: 1px; }
+  header p { opacity: .85; font-size: 13px; margin-top: 6px; }
+  .disclaimer-banner {
+    background: var(--amber-bg); color: var(--amber);
+    border-bottom: 1px solid #f0dfc2; padding: 9px 16px;
+    text-align: center; font-size: 12.5px;
+  }
+
+  /* ===== 卡片通用 ===== */
+  .card {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-top: 18px;
+    box-shadow: 0 1px 3px rgba(21, 101, 192, .06);
+  }
+  .card h2 {
+    font-size: 16px; color: var(--primary);
+    border-left: 4px solid var(--primary); padding-left: 10px; margin-bottom: 14px;
+  }
+
+  /* ===== 表单 ===== */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .form-item label { display: block; font-size: 13px; color: var(--text-sub); margin-bottom: 4px; }
+  .form-item label .req { color: var(--red); }
+  .form-item input, .form-item select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font-size: 14px; background: #fff;
+  }
+  .form-item input:focus, .form-item select:focus {
+    outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light);
+  }
+  .hint { font-size: 12px; color: var(--text-sub); }
+  .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-sub); }
+  .btn {
+    display: inline-block; background: var(--primary); color: #fff; border: none;
+    padding: 11px 34px; border-radius: 6px; font-size: 15px; cursor: pointer;
+    margin-top: 16px; transition: background .15s;
+  }
+  .btn:hover { background: #0d47a1; }
+  .btn:disabled { background: #9db8d2; cursor: not-allowed; }
+  .bmi-live { font-weight: bold; color: var(--primary); }
+
+  /* ===== 结果区 ===== */
+  .placeholder { text-align: center; color: var(--text-sub); padding: 46px 0; font-size: 14px; }
+  .error-msg { background: var(--red-bg); color: var(--red); padding: 10px 14px; border-radius: 6px; font-size: 13.5px; }
+
+  .risk-badge {
+    display: inline-block; padding: 6px 22px; border-radius: 20px;
+    font-size: 18px; font-weight: bold; margin-bottom: 12px;
+  }
+  .risk-low    { background: var(--green-bg); color: var(--green); }
+  .risk-medium { background: var(--amber-bg); color: var(--amber); }
+  .risk-high   { background: var(--red-bg);   color: var(--red); }
+  .reason-list { list-style: none; }
+  .reason-list li {
+    padding: 7px 0 7px 26px; position: relative; font-size: 13.5px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .reason-list li:last-child { border-bottom: none; }
+  .reason-list li::before { content: "▸"; position: absolute; left: 8px; color: var(--primary); }
+  .info-note { font-size: 12.5px; color: var(--text-sub); margin-top: 10px; }
+
+  /* 指标条 */
+  .goal-strip { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .goal-chip {
+    flex: 1; min-width: 130px; background: var(--primary-light);
+    border-radius: 8px; padding: 10px 14px; text-align: center;
+  }
+  .goal-chip .num { font-size: 20px; font-weight: bold; color: var(--primary); }
+  .goal-chip .lab { font-size: 12px; color: var(--text-sub); }
+
+  /* 双栏：饼图 + 表格 */
+  .two-col { display: grid; grid-template-columns: 1fr 1.4fr; gap: 18px; }
+  @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+  .chart-box { position: relative; height: 260px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center; }
+  th { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+  .tag-ok  { background: var(--green-bg); color: var(--green); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
+  .tag-warn{ background: var(--amber-bg); color: var(--amber); border-radius: 12px; padding: 2px 10px; font-size: 12px; }
+
+  /* 三餐卡片 */
+  .meals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .meal-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: #fbfdff; }
+  .meal-title { font-weight: bold; color: var(--primary); font-size: 15px; margin-bottom: 8px; }
+  .meal-title small { color: var(--text-sub); font-weight: normal; }
+  .meal-item { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13.5px; }
+  .meal-item:last-of-type { border-bottom: none; }
+  .meal-item .name { font-weight: 600; }
+  .meal-item .portion { color: var(--primary); white-space: nowrap; }
+  .meal-reason { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+  .meal-notes { font-size: 12px; color: var(--amber); margin-top: 8px; }
+
+  /* 被过滤食物 */
+  .excluded-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ex-tag {
+    background: var(--red-bg); color: var(--red);
+    border-radius: 14px; padding: 3px 12px; font-size: 12.5px;
+    cursor: default;
+  }
+
+  .advice-list { list-style: none; }
+  .advice-list li { padding: 5px 0 5px 24px; position: relative; font-size: 13.5px; }
+  .advice-list li::before { content: "✓"; position: absolute; left: 4px; color: var(--green); font-weight: bold; }
+
+  footer { text-align: center; font-size: 12px; color: var(--text-sub); margin-top: 28px; padding: 0 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🩺 DiaDiet AI</h1>
+  <p>糖尿病风险评估 + 个性化一日三餐饮食推荐 · 依据《中国2型糖尿病防治指南（2020年版）》</p>
+</header>
+<div class="disclaimer-banner">
+  ⚠️ 本系统为医学人工智能课程项目，评估结果仅供健康教育参考，<b>不构成医学诊断或治疗建议</b>，如有疑问请咨询医生。
+</div>
+
+<div class="container">
+
+  <!-- ========== 输入表单 ========== -->
+  <div class="card">
+    <h2>📋 录入体检指标</h2>
+    <div class="form-grid">
+      <div class="form-item">
+        <label>年龄 <span class="req">*</span></label>
+        <input type="number" id="age" placeholder="如 52" min="1" max="120" required>
+      </div>
+      <div class="form-item">
+        <label>性别 <span class="req">*</span></label>
+        <select id="sex">
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+      </div>
+      <div class="form-item">
+        <label>空腹血糖 FPG（mmol/L）</label>
+        <input type="number" id="fpg" placeholder="正常 < 6.1" step="0.1" min="1" max="45">
+      </div>
+      <div class="form-item">
+        <label>糖化血红蛋白 HbA1c（%）</label>
+        <input type="number" id="hba1c" placeholder="正常 < 6.0" step="0.1" min="3" max="20">
+      </div>
+      <div class="form-item">
+        <label>身高（cm）</label>
+        <input type="number" id="height_cm" placeholder="如 172" step="1" min="100" max="230">
+      </div>
+      <div class="form-item">
+        <label>体重（kg）</label>
+        <input type="number" id="weight_kg" placeholder="如 84" step="0.1" min="25" max="250">
+      </div>
+      <div class="form-item">
+        <label>BMI</label>
+        <input type="number" id="bmi" placeholder="由身高体重自动计算" step="0.1" min="10" max="60" readonly>
+      </div>
+      <div class="form-item">
+        <label>腰围（cm）</label>
+        <input type="number" id="waist" placeholder="男≥90 / 女≥85 为腹型肥胖" step="0.5" min="40" max="200">
+      </div>
+      <div class="form-item">
+        <label>体力活动水平</label>
+        <select id="activity">
+          <option value="sedentary">久坐（几乎不运动）</option>
+          <option value="light" selected>轻度（每周1~3次）</option>
+          <option value="moderate">中度（每周3~5次）</option>
+          <option value="active">高强度（每周6~7次）</option>
+        </select>
+      </div>
+      <div class="form-item">
+        <label>OGTT 2h 血糖（mmol/L，选填）</label>
+        <input type="number" id="ogtt_2h" placeholder="正常 < 7.8" step="0.1" min="1" max="45">
+      </div>
+      <div class="form-item">
+        <label>随机血糖（mmol/L，选填）</label>
+        <input type="number" id="random_glucose" placeholder="如 11.3" step="0.1" min="1" max="45">
+      </div>
+    </div>
+    <div class="checkbox-item" style="margin-top: 12px;">
+      <input type="checkbox" id="limit_purine">
+      <label for="limit_purine">合并高尿酸/痛风（额外限制高嘌呤食物）</label>
+    </div>
+    <button class="btn" id="submitBtn" onclick="submitAssess()">开始评估并生成食谱</button>
+    <span class="hint" id="formHint" style="margin-left: 12px;"></span>
+  </div>
+
+  <!-- ========== 结果区 ========== -->
+  <div id="resultArea">
+    <div class="card"><div class="placeholder">请在上方录入体检指标，点击「开始评估并生成食谱」<br>系统将输出：风险评估 → 营养目标 → 三餐食谱 → 营养达标率</div></div>
+  </div>
+
+  <footer>
+    数据与规则来源：《中国2型糖尿病防治指南（2020年版）》《中国糖尿病医学营养治疗指南》《中国食物成分表》<br>
+    DiaDiet AI · 医学人工智能课程项目 · 本页面所有内容仅供教育参考，不构成医疗建议
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ================= 工具 ================= */
+const $ = (id) => document.getElementById(id);
+
+/* 身高体重变化时实时计算 BMI */
+function liveBmi() {
+  const h = parseFloat($("height_cm").value);
+  const w = parseFloat($("weight_kg").value);
+  $("bmi").value = (h > 0 && w > 0) ? (w / Math.pow(h / 100, 2)).toFixed(1) : "";
+}
+$("height_cm").addEventListener("input", liveBmi);
+$("weight_kg").addEventListener("input", liveBmi);
+
+/* ================= 提交评估 ================= */
+async function submitAssess() {
+  const btn = $("submitBtn");
+  const payload = {
+    age: $("age").value, sex: $("sex").value,
+    fpg: $("fpg").value, hba1c: $("hba1c").value,
+    height_cm: $("height_cm").value, weight_kg: $("weight_kg").value,
+    bmi: $("bmi").value, waist: $("waist").value,
+    ogtt_2h: $("ogtt_2h").value, random_glucose: $("random_glucose").value,
+    activity: $("activity").value, limit_purine: $("limit_purine").checked,
+  };
+
+  /* 前端基础校验 */
+  if (!payload.age) { showFormHint("请填写年龄"); return; }
+  if (!payload.fpg && !payload.hba1c && !payload.ogtt_2h && !payload.random_glucose) {
+    showFormHint("请至少填写一项血糖指标（空腹血糖 / HbA1c / OGTT / 随机血糖）");
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = "评估中…";
+  $("formHint").textContent = "";
+  try {
+    const resp = await fetch("/api/assess", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data.error || ("请求失败：" + resp.status));
+    } else {
+      renderResult(data);
+    }
+  } catch (err) {
+    showError("网络错误：" + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "开始评估并生成食谱";
+  }
+}
+
+function showFormHint(msg) {
+  $("formHint").textContent = "⚠ " + msg;
+  $("age").focus && $("age").focus();
+}
+function showError(msg) {
+  $("resultArea").innerHTML =
+    '<div class="card"><div class="error-msg">⚠ ' + escapeHtml(msg) + "</div></div>";
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ================= 渲染结果 ================= */
+let pieChart = null;   // 全局饼图实例（重复评估时先销毁）
+
+function renderResult(d) {
+  const level = d.report.risk_level;
+  const levelClass = level === "高风险" ? "risk-high" : (level === "中风险" ? "risk-medium" : "risk-low");
+  const g = d.nutrition_goals;
+  const eb = d.compliance.energy_breakdown;
+
+  /* 三餐中文名映射 */
+  const mealName = { breakfast: "🌅 早餐", lunch: "🍚 午餐", dinner: "🌙 晚餐" };
+
+  /* --- 三餐卡片 --- */
+  let mealsHtml = "";
+  for (const [key, meal] of Object.entries(d.meal_plan.meals)) {
+    const items = meal.items.map(it => `
+      <div>
+        <div class="meal-item">
+          <span class="name">${escapeHtml(it.name)}</span>
+          <span class="portion">${it.portion_g} g</span>
+        </div>
+        <div class="meal-reason">${escapeHtml(it.reason)}</div>
+      </div>`).join("");
+    mealsHtml += `
+      <div class="meal-card">
+        <div class="meal-title">${mealName[key] || key} <small>${escapeHtml(meal.notes || "")}</small></div>
+        ${items || '<div class="meal-reason">（无可用食物）</div>'}
+      </div>`;
+  }
+
+  /* --- 达标率表格 --- */
+  const rowsHtml = d.compliance.rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.label)}</td>
+      <td>${r.target}${escapeHtml(r.unit)}</td>
+      <td>${r.actual}${escapeHtml(r.unit)}</td>
+      <td>${r.ratio_pct === null ? "—" : r.ratio_pct + "%"}</td>
+      <td><span class="${r.status === "达标" ? "tag-ok" : "tag-warn"}">${escapeHtml(r.status)}</span></td>
+    </tr>`).join("");
+
+  /* --- 被过滤食物 --- */
+  const excludedHtml = d.excluded_foods.length
+    ? d.excluded_foods.map(e =>
+        `<span class="ex-tag" title="${escapeHtml(e.reason)}">${escapeHtml(e.name)}：${escapeHtml(e.reason)}</span>`).join("")
+    : '<span class="hint">当前风险等级下无食物被硬性剔除</span>';
+
+  /* --- 风险原因 --- */
+  const reasonsHtml = d.report.reasons.length
+    ? '<ul class="reason-list">' + d.report.reasons.map(r => `<li>${escapeHtml(r)}</li>`).join("") + "</ul>"
+    : '<p class="hint">所有已录入指标均在正常参考范围内。</p>';
+  const missingHtml = d.report.missing_fields.length
+    ? `<div class="info-note">ℹ️ 未录入的核心指标：${d.report.missing_fields.map(escapeHtml).join("、")}，录入后评估更准确。</div>`
+    : "";
+
+  /* --- 参数推导说明 --- */
+  const notesHtml = (d.profile.derived_notes || []).length
+    ? `<div class="info-note">ℹ️ ${d.profile.derived_notes.map(escapeHtml).join("；")}。</div>` : "";
+
+  /* --- 校验预警 --- */
+  const flagsHtml = (d.compliance.flags || []).length
+    ? `<div class="error-msg" style="margin-top:10px">⚠ ${d.compliance.flags.map(escapeHtml).join("<br>⚠ ")}</div>` : "";
+
+  $("resultArea").innerHTML = `
+    <div class="card">
+      <h2>🩸 糖尿病风险评估结果</h2>
+      <span class="risk-badge ${levelClass}">${escapeHtml(level)}</span>
+      ${reasonsHtml}
+      ${missingHtml}${notesHtml}
+      <div class="info-note">${escapeHtml(d.report.disclaimer)}</div>
+    </div>
+
+    <div class="card">
+      <h2>🎯 每日营养目标</h2>
+      <div class="goal-strip">
+        <div class="goal-chip"><div class="num">${g.target_kcal}</div><div class="lab">目标热量 kcal/天${g.weight_loss_goal ? "（含减重缺口500）" : ""}</div></div>
+        <div class="goal-chip"><div class="num">${g.bmr}</div><div class="lab">基础代谢 BMR</div></div>
+        <div class="goal-chip"><div class="num">${g.tdee}</div><div class="lab">总消耗 TDEE</div></div>
+        <div class="goal-chip"><div class="num">${g.carbs_g}g</div><div class="lab">碳水（50%供能）</div></div>
+        <div class="goal-chip"><div class="num">${g.protein_g}g</div><div class="lab">蛋白质（18%供能）</div></div>
+        <div class="goal-chip"><div class="num">${g.fat_g}g</div><div class="lab">脂肪（32%供能）</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🍽️ 一日三餐推荐食谱</h2>
+      <div class="meals-grid">${mealsHtml}</div>
+      <h2 style="margin-top:20px">💡 饮食原则建议</h2>
+      <ul class="advice-list">
+        ${(d.meal_plan.general_advice || []).map(a => `<li>${escapeHtml(a)}</li>`).join("")}
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>📊 营养分析与达标率</h2>
+      <div class="two-col">
+        <div>
+          <p class="hint" style="margin-bottom:8px">食谱三大营养素供能占比（实际）</p>
+          <div class="chart-box"><canvas id="nutrientPie"></canvas></div>
+        </div>
+        <div>
+          <p class="hint" style="margin-bottom:8px">食谱实际营养 vs 每日目标</p>
+          <table>
+            <thead><tr><th>指标</th><th>目标</th><th>实际</th><th>达标率</th><th>状态</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          ${flagsHtml}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🚫 被硬规则过滤的食物（不建议食用）</h2>
+      <div class="excluded-tags">${excludedHtml}</div>
+      <div class="info-note">过滤规则由确定性规则引擎执行（按风险等级限制GI上限${d.profile.limit_purine ? " 及嘌呤上限" : ""}），AI 无权更改。</div>
+    </div>
+
+    <div class="card">
+      <h2>📄 声明</h2>
+      <p class="hint">${escapeHtml(d.meal_plan.disclaimer)}</p>
+      <p class="hint">规则依据：${escapeHtml(d.report.guideline)}（中国2型糖尿病防治指南 2020年版）· 食谱生成引擎：确定性规则选餐（无随机性，结果可复现）</p>
+    </div>
+  `;
+
+  renderPie(eb);
+  window.scrollTo({ top: $("resultArea").offsetTop - 10, behavior: "smooth" });
+}
+
+/* ================= 饼图（Chart.js） ================= */
+function renderPie(eb) {
+  if (pieChart) { pieChart.destroy(); pieChart = null; }
+  const ctx = document.getElementById("nutrientPie").getContext("2d");
+  pieChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["碳水化合物", "蛋白质", "脂肪"],
+      datasets: [{
+        data: [eb.carbs_kcal, eb.protein_kcal, eb.fat_kcal],
+        backgroundColor: ["#42a5f5", "#66bb6a", "#ffa726"],
+        borderWidth: 2, borderColor: "#ffffff",
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const total = c.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = total ? (c.parsed / total * 100).toFixed(1) : 0;
+              return ` ${c.label}：${c.parsed} kcal（${pct}%）`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+</script>
+</body>
+</html>
